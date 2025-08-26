@@ -169,7 +169,3 @@ MIT License - see LICENSE file for details
 3. Make changes
 4. Test thoroughly
 5. Submit pull request
-
----
-
-**Built with ❤️ using Cursor AI for rapid development**
