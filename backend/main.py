@@ -17,6 +17,11 @@ import re
 from dotenv import load_dotenv
 import firebase_admin
 from firebase_admin import credentials, auth as firebase_auth
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import subprocess
+import websockets
+import logging
 
 # Load environment variables
 load_dotenv()
@@ -763,10 +768,293 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
+@app.post("/browser-automation")
+async def browser_automation(
+    task_type: str = Form(...),
+    target_url: str = Form(""),
+    user_id: str = Form(None),
+    automation_script: str = Form(""),
+    options: str = Form("{}")
+):
+    """Execute browser automation tasks using Playwright"""
+    try:
+        if user_id and not check_user_permissions(user_id, "browser-automation"):
+            raise HTTPException(status_code=403, detail="Permission denied for browser automation")
+
+        # Parse options
+        automation_options = json.loads(options) if options else {}
+        
+        # Simulate browser automation (in production, use actual Playwright)
+        if task_type == "job-search":
+            return await simulate_job_search_automation(target_url, automation_options)
+        elif task_type == "form-filling":
+            return await simulate_form_automation(target_url, automation_options)
+        elif task_type == "data-extraction":
+            return await simulate_data_extraction(target_url, automation_options)
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported automation task type")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Browser automation failed: {str(e)}")
+
+async def simulate_job_search_automation(url: str, options: dict):
+    """Simulate job search automation"""
+    await asyncio.sleep(2)  # Simulate processing time
+    
+    mock_results = [
+        {
+            "title": "Senior Software Engineer",
+            "company": "TechCorp Inc.",
+            "location": "San Francisco, CA",
+            "salary": "$150,000 - $200,000",
+            "apply_url": "https://example.com/job/1",
+            "match_score": 95
+        },
+        {
+            "title": "Full Stack Developer",
+            "company": "StartupXYZ",
+            "location": "Remote",
+            "salary": "$120,000 - $160,000",
+            "apply_url": "https://example.com/job/2",
+            "match_score": 87
+        },
+        {
+            "title": "AI Engineer",
+            "company": "AI Innovations",
+            "location": "New York, NY",
+            "salary": "$140,000 - $180,000",
+            "apply_url": "https://example.com/job/3",
+            "match_score": 92
+        }
+    ]
+    
+    return {
+        "task_type": "job-search-automation",
+        "status": "completed",
+        "results": mock_results,
+        "metadata": {
+            "total_jobs_found": len(mock_results),
+            "search_criteria": options.get("criteria", {}),
+            "execution_time": "2.3s",
+            "pages_processed": 5
+        }
+    }
+
+async def simulate_form_automation(url: str, options: dict):
+    """Simulate form filling automation"""
+    await asyncio.sleep(1.5)
+    
+    return {
+        "task_type": "form-automation",
+        "status": "completed",
+        "results": {
+            "forms_filled": 3,
+            "fields_completed": 25,
+            "screenshots_taken": 5,
+            "success_rate": "100%"
+        },
+        "metadata": {
+            "target_url": url,
+            "execution_time": "1.5s",
+            "browser_used": "Chromium"
+        }
+    }
+
+async def simulate_data_extraction(url: str, options: dict):
+    """Simulate data extraction automation"""
+    await asyncio.sleep(3)
+    
+    return {
+        "task_type": "data-extraction",
+        "status": "completed",
+        "results": {
+            "records_extracted": 150,
+            "data_points": 750,
+            "format": "JSON",
+            "file_size": "2.3MB"
+        },
+        "metadata": {
+            "target_url": url,
+            "execution_time": "3.0s",
+            "extraction_method": "CSS Selectors + XPath"
+        }
+    }
+
+@app.post("/emergency-protocol")
+async def emergency_protocol(
+    emergency_type: str = Form(...),
+    user_location: str = Form(""),
+    user_id: str = Form(None),
+    contact_info: str = Form("{}")
+):
+    """Execute emergency protocol with fallback chain"""
+    try:
+        contacts = json.loads(contact_info) if contact_info else {}
+        
+        # Log emergency request
+        if user_id:
+            conn = sqlite3.connect('astramind.db')
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO task_history (user_id, task_type, command, status, details)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (user_id, 'emergency-protocol', emergency_type, 'initiated', 
+                  json.dumps({"location": user_location, "contacts": contacts})))
+            conn.commit()
+            conn.close()
+        
+        # Simulate emergency workflow execution
+        workflow_results = []
+        
+        # Step 1: Emergency API Call
+        api_result = await simulate_emergency_api_call(emergency_type, user_location)
+        workflow_results.append(api_result)
+        
+        # Step 2: SMS Fallback
+        sms_result = await simulate_sms_notification(emergency_type, contacts)
+        workflow_results.append(sms_result)
+        
+        # Step 3: WhatsApp Backup
+        whatsapp_result = await simulate_whatsapp_notification(emergency_type, contacts)
+        workflow_results.append(whatsapp_result)
+        
+        # Step 4: Email Notification
+        email_result = await simulate_email_notification(emergency_type, contacts)
+        workflow_results.append(email_result)
+        
+        return {
+            "emergency_type": emergency_type,
+            "status": "completed",
+            "workflow_results": workflow_results,
+            "reference_id": f"EMG-{int(datetime.now().timestamp())}",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Emergency protocol failed: {str(e)}")
+
+async def simulate_emergency_api_call(emergency_type: str, location: str):
+    """Simulate emergency services API call"""
+    await asyncio.sleep(1.5)
+    
+    # 70% success rate for demo
+    success = True  # In real implementation, this would be the actual API response
+    
+    return {
+        "step": "emergency_api_call",
+        "status": "success" if success else "failed",
+        "method": "Direct 911 API",
+        "response_time": "1.5s",
+        "details": {
+            "emergency_type": emergency_type,
+            "location": location,
+            "dispatcher_id": "DISP-001" if success else None,
+            "eta": "5-8 minutes" if success else None
+        }
+    }
+
+async def simulate_sms_notification(emergency_type: str, contacts: dict):
+    """Simulate SMS notification"""
+    await asyncio.sleep(0.8)
+    
+    return {
+        "step": "sms_notification",
+        "status": "success",
+        "method": "SMS Gateway",
+        "response_time": "0.8s",
+        "details": {
+            "messages_sent": 2,
+            "recipients": [contacts.get("primary", "+1-XXX-XXX-XXXX"), 
+                          contacts.get("emergency", "+1-XXX-XXX-XXXX")],
+            "delivery_status": "delivered"
+        }
+    }
+
+async def simulate_whatsapp_notification(emergency_type: str, contacts: dict):
+    """Simulate WhatsApp notification"""
+    await asyncio.sleep(0.6)
+    
+    return {
+        "step": "whatsapp_notification",
+        "status": "success",
+        "method": "WhatsApp Business API",
+        "response_time": "0.6s",
+        "details": {
+            "messages_sent": 1,
+            "location_shared": True,
+            "media_included": "location_pin",
+            "read_receipt": "pending"
+        }
+    }
+
+async def simulate_email_notification(emergency_type: str, contacts: dict):
+    """Simulate email notification"""
+    await asyncio.sleep(0.4)
+    
+    return {
+        "step": "email_notification",
+        "status": "success",
+        "method": "SMTP",
+        "response_time": "0.4s",
+        "details": {
+            "emails_sent": 3,
+            "recipients": ["emergency@example.com", "family@example.com", "backup@example.com"],
+            "includes_location": True,
+            "includes_medical_info": True
+        }
+    }
+
+@app.get("/task-status/{task_id}")
+async def get_task_status(task_id: str):
+    """Get real-time task status and progress"""
+    try:
+        # In production, this would query a task queue (Redis/Celery)
+        # For demo, return simulated status
+        
+        mock_statuses = {
+            "job-search-automation": {
+                "status": "running",
+                "progress": 65,
+                "current_operation": "Processing LinkedIn results...",
+                "logs": [
+                    "Task initiated",
+                    "Browser launched",
+                    "Navigating to LinkedIn",
+                    "Extracting job listings",
+                    "Processing results..."
+                ],
+                "eta_seconds": 45
+            },
+            "browser-automation": {
+                "status": "completed",
+                "progress": 100,
+                "current_operation": "Task completed successfully",
+                "logs": [
+                    "Task initiated",
+                    "Browser launched",
+                    "Forms filled",
+                    "Data extracted",
+                    "Task completed"
+                ],
+                "eta_seconds": 0
+            }
+        }
+        
+        return mock_statuses.get(task_id, {
+            "status": "not_found",
+            "progress": 0,
+            "current_operation": "Task not found",
+            "logs": [],
+            "eta_seconds": 0
+        })
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get task status: {str(e)}")
+
 @app.get("/")
 async def root():
     """Root endpoint"""
-    return {"message": "AstraMind AI Agent API", "version": "1.0.0"}
+    return {"message": "AstraMind AI Agent API - Phase 4", "version": "4.0.0"}
 
 if __name__ == "__main__":
     import uvicorn

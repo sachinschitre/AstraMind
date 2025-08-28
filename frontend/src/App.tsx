@@ -33,13 +33,18 @@ import ProfilePage from "./components/ProfilePage";
 import SecurityGate from "./components/SecurityGate";
 import { authService, onAuthStateChange, UserProfile } from "./firebase";
 
+// Phase 4 Components
+import TaskLibrary from "./components/TaskLibrary";
+import EmergencyWorkflow from "./components/EmergencyWorkflow";
+import TaskProgressMonitor from "./components/TaskProgressMonitor";
+
 // -------------------------------------------------------------
-// ASTRA MIND – Phase 3 User Management & Security
-// - Firebase Authentication (Login/Signup)
-// - User Profiles with Role-based Permissions
-// - Security Gates for Sensitive Operations
-// - Task History and Usage Analytics
-// - Enhanced Voice Confirmation System
+// ASTRA MIND – Phase 4 Full Agentic Control
+// - Advanced Task Library with Drag & Drop
+// - Real-time Progress Monitoring
+// - Browser Automation Integration
+// - Emergency Protocol Workflows
+// - Intelligent Task Orchestration
 // -------------------------------------------------------------
 
 // Simple local storage helpers
@@ -67,7 +72,7 @@ type LogRow = {
   msg: string;
 };
 
-type NavKey = "tasks" | "settings" | "help" | "profile";
+type NavKey = "tasks" | "automation" | "settings" | "help" | "profile";
 
 type YouTubeSummary = {
   video_id: string;
@@ -101,6 +106,11 @@ export default function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showSecurityGate, setShowSecurityGate] = useState(false);
   const [pendingOperation, setPendingOperation] = useState<any>(null);
+
+  // --- Phase 4 Features ---
+  const [showEmergencyWorkflow, setShowEmergencyWorkflow] = useState(false);
+  const [activeTasks, setActiveTasks] = useState<any[]>([]);
+  const [taskProgress, setTaskProgress] = useState<Record<string, any>>({});
 
   // Monitor auth state
   useEffect(() => {
@@ -558,6 +568,130 @@ export default function App() {
     }
   };
 
+  // --- Phase 4 Task Management ---
+  const handleTaskExecution = async (taskId: string) => {
+    if (!user) {
+      pushLog("warn", "🔐 Please sign in to execute advanced tasks");
+      setShowAuthModal(true);
+      return;
+    }
+
+    pushLog("info", `🚀 Starting advanced task: ${taskId}`);
+    
+    const newTask = {
+      taskId,
+      taskName: getTaskName(taskId),
+      progress: 0,
+      status: 'running' as const,
+      logs: [`Task ${taskId} initiated by ${user.displayName || user.email}`],
+      startTime: new Date(),
+      currentOperation: 'Initializing...',
+      metrics: {
+        cpuUsage: Math.floor(Math.random() * 30) + 20,
+        memoryUsage: Math.floor(Math.random() * 200) + 100,
+        networkActivity: Math.floor(Math.random() * 100) + 50
+      }
+    };
+
+    setActiveTasks(prev => [...prev, newTask]);
+
+    // Log task activity
+    await logUserActivity('task-execution', { taskId, taskType: 'advanced-automation' }, 'pending');
+
+    // Handle special cases
+    if (taskId === 'emergency-protocol') {
+      setShowEmergencyWorkflow(true);
+      return;
+    }
+
+    // Simulate browser automation for relevant tasks
+    if (['job-search-automation', 'browser-automation'].includes(taskId)) {
+      await simulateBrowserAutomation(taskId);
+    }
+  };
+
+  const getTaskName = (taskId: string): string => {
+    const taskNames: Record<string, string> = {
+      'job-search-automation': 'Job Search Automation',
+      'sales-call-analysis': 'Sales Call Analysis',
+      'mock-interview': 'Mock Interview Coach',
+      'emergency-protocol': 'Emergency Protocol',
+      'browser-automation': 'Browser Automation',
+      'ai-workflow-builder': 'AI Workflow Builder'
+    };
+    return taskNames[taskId] || taskId;
+  };
+
+  const simulateBrowserAutomation = async (taskId: string) => {
+    const operations = [
+      'Launching browser instance...',
+      'Navigating to target website...',
+      'Extracting page data...',
+      'Processing automation scripts...',
+      'Performing form interactions...',
+      'Capturing screenshots...',
+      'Generating results...',
+      'Cleaning up browser session...'
+    ];
+
+    for (let i = 0; i < operations.length; i++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const progress = Math.floor(((i + 1) / operations.length) * 100);
+      
+      setActiveTasks(prev => prev.map(task => 
+        task.taskId === taskId 
+          ? { 
+              ...task, 
+              progress,
+              currentOperation: operations[i],
+              logs: [...task.logs, `${new Date().toLocaleTimeString()}: ${operations[i]}`],
+              metrics: {
+                cpuUsage: Math.floor(Math.random() * 50) + 30,
+                memoryUsage: Math.floor(Math.random() * 300) + 150,
+                networkActivity: Math.floor(Math.random() * 200) + 100
+              }
+            }
+          : task
+      ));
+    }
+
+    // Complete task
+    setActiveTasks(prev => prev.map(task => 
+      task.taskId === taskId 
+        ? { 
+            ...task, 
+            status: 'completed' as const,
+            progress: 100,
+            currentOperation: 'Task completed successfully!',
+            logs: [...task.logs, `${new Date().toLocaleTimeString()}: ✅ Task completed successfully!`]
+          }
+        : task
+    ));
+
+    await logUserActivity('task-execution', { taskId, result: 'success' }, 'success');
+    pushLog("success", `✅ Advanced task ${getTaskName(taskId)} completed successfully!`);
+  };
+
+  const handleTaskCancel = (taskId: string) => {
+    setActiveTasks(prev => prev.filter(task => task.taskId !== taskId));
+    pushLog("warn", `⏹️ Task ${getTaskName(taskId)} cancelled by user`);
+  };
+
+  const handleTaskPause = (taskId: string) => {
+    setActiveTasks(prev => prev.map(task => 
+      task.taskId === taskId ? { ...task, status: 'paused' as const } : task
+    ));
+    pushLog("info", `⏸️ Task ${getTaskName(taskId)} paused`);
+  };
+
+  const handleTaskResume = (taskId: string) => {
+    setActiveTasks(prev => prev.map(task => 
+      task.taskId === taskId ? { ...task, status: 'running' as const } : task
+    ));
+    pushLog("info", `▶️ Task ${getTaskName(taskId)} resumed`);
+  };
+
   // --- Sign Out ---
   const handleSignOut = async () => {
     executeWithSecurity(
@@ -599,7 +733,7 @@ export default function App() {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-2">
             <LayoutGrid className="h-6 w-6" />
-            <span className="font-semibold tracking-tight">AstraMind • Phase 3 Security</span>
+            <span className="font-semibold tracking-tight">AstraMind • Phase 4 Agentic</span>
           </div>
           <div className="flex items-center gap-2">
             {/* Quick Voice Command Button */}
@@ -689,6 +823,15 @@ export default function App() {
             >
               <LayoutGrid className="h-4 w-4" />
               <span>Tasks</span>
+            </button>
+            <button
+              onClick={() => setNav("automation")}
+              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground ${
+                nav === "automation" ? "bg-accent text-accent-foreground" : ""
+              }`}
+            >
+              <LayoutGrid className="h-4 w-4" />
+              <span>Automation</span>
             </button>
             <button
               onClick={() => setNav("settings")}
@@ -1284,6 +1427,14 @@ export default function App() {
             </div>
           )}
 
+          {nav === "automation" && (
+            <TaskLibrary 
+              user={user}
+              userProfile={userProfile}
+              onTaskExecute={handleTaskExecution}
+            />
+          )}
+
           {nav === "profile" && user && (
             <ProfilePage
               user={user}
@@ -1404,6 +1555,23 @@ export default function App() {
         operation={pendingOperation?.operation || ""}
         description={pendingOperation?.description || ""}
         requireVoiceConfirmation={true}
+      />
+
+      {/* Task Progress Monitor */}
+      <TaskProgressMonitor
+        activeTasks={activeTasks}
+        onTaskCancel={handleTaskCancel}
+        onTaskPause={handleTaskPause}
+        onTaskResume={handleTaskResume}
+      />
+
+      {/* Emergency Workflow */}
+      <EmergencyWorkflow
+        isOpen={showEmergencyWorkflow}
+        onClose={() => setShowEmergencyWorkflow(false)}
+        emergencyType={emergencyType}
+        user={user}
+        userLocation={{ lat: 37.7749, lng: -122.4194, address: "San Francisco, CA" }}
       />
 
       {/* Loading Overlay */}
