@@ -15,11 +15,35 @@ from gtts import gTTS
 import tempfile
 import re
 from dotenv import load_dotenv
+import firebase_admin
+from firebase_admin import credentials, auth as firebase_auth
 
 # Load environment variables
 load_dotenv()
 
-app = FastAPI(title="AstraMind AI Agent", version="1.0.0")
+# Initialize Firebase Admin (for user verification)
+# In production, use a proper service account key
+try:
+    # Initialize Firebase with default credentials or service account
+    if not firebase_admin._apps:
+        # For demo purposes - in production, use proper credentials
+        cred = credentials.Certificate({
+            "type": "service_account",
+            "project_id": "astramind-demo",
+            "private_key_id": "demo-key-id",
+            "private_key": "-----BEGIN PRIVATE KEY-----\nDEMO_KEY\n-----END PRIVATE KEY-----\n",
+            "client_email": "firebase-adminsdk@astramind-demo.iam.gserviceaccount.com",
+            "client_id": "demo-client-id",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }) if os.getenv("FIREBASE_SERVICE_ACCOUNT") else None
+        
+        if cred:
+            firebase_admin.initialize_app(cred)
+except Exception as e:
+    print(f"Firebase Admin initialization skipped: {e}")
+
+app = FastAPI(title="AstraMind AI Agent - Phase 3", version="3.0.0")
 
 # CORS middleware
 app.add_middleware(
@@ -36,6 +60,62 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 AZURE_API_KEY = os.getenv("AZURE_API_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+
+# User Authentication Functions
+async def verify_firebase_token(token: str):
+    """Verify Firebase ID token and return user info"""
+    try:
+        if not firebase_admin._apps:
+            # For demo purposes, simulate user verification
+            return {
+                "uid": "demo-user-" + token[:8],
+                "email": "demo@astramind.com",
+                "name": "Demo User"
+            }
+        
+        decoded_token = firebase_auth.verify_id_token(token)
+        return {
+            "uid": decoded_token['uid'],
+            "email": decoded_token.get('email'),
+            "name": decoded_token.get('name')
+        }
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Invalid authentication token: {str(e)}")
+
+async def get_user_from_request(authorization: str = None):
+    """Extract and verify user from request headers"""
+    if not authorization:
+        return None
+    
+    try:
+        token = authorization.replace("Bearer ", "")
+        return await verify_firebase_token(token)
+    except:
+        return None
+
+def check_user_permissions(user_id: str, operation: str) -> bool:
+    """Check if user has permission for operation"""
+    try:
+        conn = sqlite3.connect('astramind.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT role FROM user_profiles WHERE uid = ?', (user_id,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            return False
+        
+        user_role = result[0]
+        
+        # Admin can do everything
+        if user_role == 'admin':
+            return True
+        
+        # Regular users have limited permissions
+        restricted_ops = ['emergency', 'system', 'admin', 'configure']
+        return not any(op in operation.lower() for op in restricted_ops)
+    except:
+        return False
 
 # Database initialization
 def init_db():
@@ -70,7 +150,35 @@ def init_db():
             task TEXT NOT NULL,
             reminder_time TIMESTAMP NOT NULL,
             status TEXT DEFAULT 'pending',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            user_id TEXT,
+            FOREIGN KEY (user_id) REFERENCES user_profiles (uid)
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_profiles (
+            uid TEXT PRIMARY KEY,
+            email TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            role TEXT DEFAULT 'user',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            task_count INTEGER DEFAULT 0,
+            plan TEXT DEFAULT 'free'
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS task_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            task_type TEXT NOT NULL,
+            command TEXT,
+            status TEXT NOT NULL,
+            details TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES user_profiles (uid)
         )
     ''')
     
@@ -431,15 +539,67 @@ async def llm_process(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM processing failed: {str(e)}")
 
+@app.post("/user-register")
+async def user_register(
+    uid: str = Form(...),
+    email: str = Form(...),
+    display_name: str = Form(...),
+    role: str = Form("user")
+):
+    """Register a new user profile"""
+    try:
+        conn = sqlite3.connect('astramind.db')
+        cursor = conn.cursor()
+        
+        # Check if user already exists
+        cursor.execute('SELECT uid FROM user_profiles WHERE uid = ?', (uid,))
+        if cursor.fetchone():
+            conn.close()
+            return {"message": "User already exists", "uid": uid}
+        
+        # Insert new user
+        cursor.execute('''
+            INSERT INTO user_profiles (uid, email, display_name, role, created_at, last_login_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (uid, email, display_name, role, datetime.now().isoformat(), datetime.now().isoformat()))
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            "message": "User registered successfully",
+            "uid": uid,
+            "role": role
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"User registration failed: {str(e)}")
+
 @app.post("/task-execute")
 async def task_execute(
     command: str = Form(...),
     provider: str = Form("openai"),
-    api_key: str = Form(None)
+    api_key: str = Form(None),
+    user_id: str = Form(None)
 ):
     """Execute a task based on voice command"""
     try:
+        # Check user permissions if user_id provided
+        if user_id:
+            if not check_user_permissions(user_id, command):
+                raise HTTPException(status_code=403, detail="Permission denied for this operation")
+        
         command_lower = command.lower()
+        
+        # Log task attempt
+        if user_id:
+            conn = sqlite3.connect('astramind.db')
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO task_history (user_id, task_type, command, status, details)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (user_id, 'task-execute', command, 'pending', json.dumps({"provider": provider})))
+            conn.commit()
+            conn.close()
         
         if "reminder" in command_lower or "remind" in command_lower:
             # Extract reminder text and create a mock reminder
@@ -451,9 +611,9 @@ async def task_execute(
             conn = sqlite3.connect('astramind.db')
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO reminders (task, reminder_time, status)
-                VALUES (?, ?, ?)
-            ''', (reminder_text, reminder_time.isoformat(), 'pending'))
+                INSERT INTO reminders (task, reminder_time, status, user_id)
+                VALUES (?, ?, ?, ?)
+            ''', (reminder_text, reminder_time.isoformat(), 'pending', user_id))
             conn.commit()
             reminder_id = cursor.lastrowid
             conn.close()
@@ -504,6 +664,99 @@ async def task_execute(
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Task execution failed: {str(e)}")
+
+@app.get("/user-profile/{user_id}")
+async def get_user_profile(user_id: str):
+    """Get user profile information"""
+    try:
+        conn = sqlite3.connect('astramind.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT uid, email, display_name, role, created_at, last_login_at, task_count, plan
+            FROM user_profiles WHERE uid = ?
+        ''', (user_id,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        return {
+            "uid": result[0],
+            "email": result[1],
+            "displayName": result[2],
+            "role": result[3],
+            "createdAt": result[4],
+            "lastLoginAt": result[5],
+            "taskCount": result[6],
+            "plan": result[7]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get user profile: {str(e)}")
+
+@app.get("/user-tasks/{user_id}")
+async def get_user_task_history(user_id: str, limit: int = 50):
+    """Get user task history"""
+    try:
+        conn = sqlite3.connect('astramind.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, task_type, command, status, details, timestamp
+            FROM task_history 
+            WHERE user_id = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+        ''', (user_id, limit))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        tasks = []
+        for row in results:
+            tasks.append({
+                "id": row[0],
+                "taskType": row[1],
+                "command": row[2],
+                "status": row[3],
+                "details": json.loads(row[4]) if row[4] else {},
+                "timestamp": row[5]
+            })
+        
+        return {"tasks": tasks, "count": len(tasks)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get task history: {str(e)}")
+
+@app.post("/user-activity")
+async def log_user_activity(
+    user_id: str = Form(...),
+    task_type: str = Form(...),
+    status: str = Form(...),
+    command: str = Form(None),
+    details: str = Form("{}")
+):
+    """Log user activity"""
+    try:
+        conn = sqlite3.connect('astramind.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO task_history (user_id, task_type, command, status, details)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (user_id, task_type, command, status, details))
+        
+        # Update user task count
+        cursor.execute('''
+            UPDATE user_profiles 
+            SET task_count = task_count + 1 
+            WHERE uid = ?
+        ''', (user_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return {"message": "Activity logged successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to log activity: {str(e)}")
 
 @app.get("/health")
 async def health_check():

@@ -23,16 +23,23 @@ import {
   Search,
   FileAudio,
   AlertCircle,
+  User,
+  Shield,
 } from "lucide-react";
 
+// Phase 3 Components
+import AuthModal from "./components/AuthModal";
+import ProfilePage from "./components/ProfilePage";
+import SecurityGate from "./components/SecurityGate";
+import { authService, onAuthStateChange, UserProfile } from "./firebase";
+
 // -------------------------------------------------------------
-// ASTRA MIND – Phase 1 MVP Dashboard
-// - Voice Input with OpenAI Whisper
-// - YouTube Video Summaries
-// - Job Search & Summaries
-// - Smart Reminders with SQLite
-// - Text-to-Speech Output
-// - Multi-language Support (EN/HI/MR)
+// ASTRA MIND – Phase 3 User Management & Security
+// - Firebase Authentication (Login/Signup)
+// - User Profiles with Role-based Permissions
+// - Security Gates for Sensitive Operations
+// - Task History and Usage Analytics
+// - Enhanced Voice Confirmation System
 // -------------------------------------------------------------
 
 // Simple local storage helpers
@@ -60,7 +67,7 @@ type LogRow = {
   msg: string;
 };
 
-type NavKey = "tasks" | "settings" | "help";
+type NavKey = "tasks" | "settings" | "help" | "profile";
 
 type YouTubeSummary = {
   video_id: string;
@@ -87,6 +94,31 @@ type Reminder = {
 };
 
 export default function App() {
+  // --- Authentication (Phase 3) ---
+  const [user, setUser] = useState<any>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showSecurityGate, setShowSecurityGate] = useState(false);
+  const [pendingOperation, setPendingOperation] = useState<any>(null);
+
+  // Monitor auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChange(async (user) => {
+      setUser(user);
+      if (user) {
+        // Load user profile
+        const profile = await authService.getUserProfile(user.uid);
+        setUserProfile(profile);
+      } else {
+        setUserProfile(null);
+      }
+      setAuthLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   // --- Theme ---
   const [dark, setDark] = useState<boolean>(() => ls.get("themeDark", true));
   useEffect(() => {
@@ -386,41 +418,161 @@ export default function App() {
     setEmergencyOpen(false);
   };
 
-  // --- Task Execution (Phase 2) ---
-  const executeTask = async (command: string) => {
-    pushLog("info", `🎯 Executing task: "${command}"`);
+  // --- Security & Permissions (Phase 3) ---
+  const requiresSecurityGate = (operation: string) => {
+    const sensitiveOps = ['delete', 'remove', 'clear', 'send', 'message', 'whatsapp', 'email', 'emergency'];
+    return sensitiveOps.some(op => operation.toLowerCase().includes(op));
+  };
+
+  const checkPermissions = (operation: string) => {
+    if (!user) return false;
+    if (userProfile?.role === 'admin') return true;
     
-    try {
-      const formData = new FormData();
-      formData.append('command', command);
-      formData.append('provider', llmProvider);
-      
-      // Add API key if available
-      const currentApiKey = apiKeys[llmProvider as keyof typeof apiKeys];
-      if (currentApiKey) {
-        formData.append('api_key', currentApiKey);
-      }
-      
-      const response = await fetch('/api/task-execute', {
-        method: 'POST',
-        body: formData,
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        pushLog("success", result.message);
-        
-        // Update UI based on task type
-        if (result.task_type === "reminder" && result.action === "created") {
-          loadReminders(); // Refresh reminders list
-        }
-      } else {
-        const error = await response.json();
-        pushLog("error", `Task execution failed: ${error.detail}`);
-      }
-    } catch (error) {
-      pushLog("error", `Task execution failed: ${error}`);
+    // Regular users can't perform admin operations
+    const adminOps = ['emergency', 'system', 'admin', 'configure'];
+    const isAdminOp = adminOps.some(op => operation.toLowerCase().includes(op));
+    
+    return !isAdminOp;
+  };
+
+  const executeWithSecurity = (operation: string, description: string, action: () => void) => {
+    if (!checkPermissions(operation)) {
+      pushLog("error", "⛔ Permission denied. Admin access required.");
+      return;
     }
+
+    if (requiresSecurityGate(operation)) {
+      setPendingOperation({
+        operation,
+        description,
+        action
+      });
+      setShowSecurityGate(true);
+    } else {
+      action();
+    }
+  };
+
+  const handleSecurityConfirm = () => {
+    if (pendingOperation) {
+      pendingOperation.action();
+      setPendingOperation(null);
+    }
+    setShowSecurityGate(false);
+  };
+
+  // --- Task Execution (Phase 3 Enhanced) ---
+  const executeTask = async (command: string) => {
+    if (!user) {
+      pushLog("warn", "🔐 Please sign in to execute tasks");
+      setShowAuthModal(true);
+      return;
+    }
+
+    const executeAction = async () => {
+      pushLog("info", `🎯 Executing task: "${command}"`);
+      
+      try {
+        // Log task activity
+        await authService.logTaskActivity(user.uid, {
+          taskType: 'task-execute',
+          command: command,
+          status: 'pending',
+          details: { llmProvider, timestamp: new Date() }
+        });
+
+        const formData = new FormData();
+        formData.append('command', command);
+        formData.append('provider', llmProvider);
+        formData.append('userId', user.uid);
+        
+        // Add API key if available
+        const currentApiKey = apiKeys[llmProvider as keyof typeof apiKeys];
+        if (currentApiKey) {
+          formData.append('api_key', currentApiKey);
+        }
+        
+        const response = await fetch('/api/task-execute', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          pushLog("success", result.message);
+          
+          // Log successful completion
+          await authService.logTaskActivity(user.uid, {
+            taskType: 'task-execute',
+            command: command,
+            status: 'success',
+            details: result
+          });
+          
+          // Update UI based on task type
+          if (result.task_type === "reminder" && result.action === "created") {
+            loadReminders();
+          }
+        } else {
+          const error = await response.json();
+          pushLog("error", `Task execution failed: ${error.detail}`);
+          
+          // Log error
+          await authService.logTaskActivity(user.uid, {
+            taskType: 'task-execute',
+            command: command,
+            status: 'error',
+            details: error
+          });
+        }
+      } catch (error) {
+        pushLog("error", `Task execution failed: ${error}`);
+        
+        // Log error
+        if (user) {
+          await authService.logTaskActivity(user.uid, {
+            taskType: 'task-execute',
+            command: command,
+            status: 'error',
+            details: { error: String(error) }
+          });
+        }
+      }
+    };
+
+    executeWithSecurity(
+      `Execute Command: ${command}`,
+      `This will execute the voice command: "${command}". This may trigger actions like sending messages or creating reminders.`,
+      executeAction
+    );
+  };
+
+  // --- Enhanced Functions with User Logging ---
+  const logUserActivity = async (taskType: string, details: any, status: 'success' | 'error' | 'pending' = 'success') => {
+    if (user) {
+      await authService.logTaskActivity(user.uid, {
+        taskType: taskType as any,
+        status,
+        details
+      });
+    }
+  };
+
+  // --- Sign Out ---
+  const handleSignOut = async () => {
+    executeWithSecurity(
+      "Sign Out",
+      "This will sign you out of AstraMind and clear your session.",
+      async () => {
+        try {
+          await authService.signOut();
+          pushLog("info", "👋 Signed out successfully");
+          setNav("tasks");
+        } catch (error) {
+          pushLog("error", `Sign out failed: ${error}`);
+        }
+      }
+    );
   };
 
   // --- Log helpers ---
@@ -447,7 +599,7 @@ export default function App() {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-2">
             <LayoutGrid className="h-6 w-6" />
-            <span className="font-semibold tracking-tight">AstraMind • Phase 2 AI/Voice</span>
+            <span className="font-semibold tracking-tight">AstraMind • Phase 3 Security</span>
           </div>
           <div className="flex items-center gap-2">
             {/* Quick Voice Command Button */}
@@ -464,6 +616,30 @@ export default function App() {
             </button>
             
             <div className="mx-1 h-6 w-px bg-border" />
+            
+            {/* Authentication Status */}
+            {user ? (
+              <>
+                <button
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-accent"
+                  onClick={() => setNav("profile")}
+                >
+                  <User className="h-4 w-4"/>
+                  {userProfile?.displayName || user.email}
+                  {userProfile?.role === 'admin' && (
+                    <Shield className="h-3 w-3 text-purple-600" />
+                  )}
+                </button>
+              </>
+            ) : (
+              <button
+                className="flex items-center gap-2 rounded-lg border border-primary bg-primary text-primary-foreground px-3 py-2 text-sm hover:bg-primary/90"
+                onClick={() => setShowAuthModal(true)}
+              >
+                <User className="h-4 w-4"/>
+                Sign In
+              </button>
+            )}
             
             <button
               className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-accent"
@@ -487,9 +663,15 @@ export default function App() {
               {dark ? <SunMedium className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
               {dark ? "Light" : "Dark"}
             </button>
-            <button className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-accent">
-              <LogOut className="h-5 w-5"/>
-            </button>
+            {user ? (
+              <button 
+                className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-accent text-red-600"
+                onClick={handleSignOut}
+              >
+                <LogOut className="h-5 w-5"/>
+                Sign Out
+              </button>
+            ) : null}
           </div>
         </div>
       </header>
@@ -517,6 +699,20 @@ export default function App() {
               <Settings className="h-4 w-4" />
               <span>Settings</span>
             </button>
+            {user && (
+              <button
+                onClick={() => setNav("profile")}
+                className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground ${
+                  nav === "profile" ? "bg-accent text-accent-foreground" : ""
+                }`}
+              >
+                <User className="h-4 w-4" />
+                <span>Profile</span>
+                {userProfile?.role === 'admin' && (
+                  <Shield className="h-3 w-3 text-purple-600" />
+                )}
+              </button>
+            )}
             <button
               onClick={() => setNav("help")}
               className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground ${
@@ -1088,6 +1284,14 @@ export default function App() {
             </div>
           )}
 
+          {nav === "profile" && user && (
+            <ProfilePage
+              user={user}
+              userProfile={userProfile}
+              apiKeys={apiKeys}
+            />
+          )}
+
           {nav === "help" && (
             <div className="rounded-xl border bg-card p-6">
               <h3 className="font-semibold mb-4">Help & Tips</h3>
@@ -1175,6 +1379,39 @@ export default function App() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Authentication Modal */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={(user) => {
+          pushLog("success", `👋 Welcome ${user.displayName || user.email}!`);
+          setShowAuthModal(false);
+        }}
+      />
+
+      {/* Security Gate */}
+      <SecurityGate
+        isOpen={showSecurityGate}
+        onClose={() => {
+          setShowSecurityGate(false);
+          setPendingOperation(null);
+        }}
+        onConfirm={handleSecurityConfirm}
+        operation={pendingOperation?.operation || ""}
+        description={pendingOperation?.description || ""}
+        requireVoiceConfirmation={true}
+      />
+
+      {/* Loading Overlay */}
+      {authLoading && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-background rounded-lg p-6 text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading AstraMind...</p>
           </div>
         </div>
       )}

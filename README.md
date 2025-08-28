@@ -1,8 +1,17 @@
-# AstraMind Phase-2 - Enhanced AI/Voice Integration
+# AstraMind Phase-3 - User Management & Security
 
-🎯 **Objective**: Local AI agent with advanced voice commands, multiple LLM providers, and intelligent task execution capabilities.
+🎯 **Objective**: Enterprise-ready AI agent with comprehensive user management, authentication, role-based permissions, and voice-activated security features.
 
-## ✨ New Phase-2 Features
+## 🔐 NEW Phase-3 Features
+
+### User Management & Security
+- **👤 Firebase Authentication**: Email/password login with secure session management
+- **🛡️ Role-Based Permissions**: Admin vs User access levels with operation-specific controls
+- **📊 User Profiles**: Comprehensive dashboards with statistics, API key status, and task history
+- **🗣️ Voice Security Gates**: "Yes, execute" confirmation for sensitive operations
+- **🔒 Data Privacy**: User-specific data isolation and encrypted storage
+
+## ✨ Phase-2 Features
 
 ### Enhanced AI Integration
 - **🤖 Multi-LLM Support**: OpenAI, Anthropic Claude, Azure OpenAI, Local LLM ready
