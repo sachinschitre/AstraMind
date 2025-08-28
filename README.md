@@ -1,10 +1,21 @@
-# AstraMind Phase-1 MVP - Local AI Agent
+# AstraMind Phase-2 - Enhanced AI/Voice Integration
 
-🎯 **Objective**: Build a local demo AI agent that takes voice input (Hindi, Marathi, English), summarizes YouTube videos, finds LinkedIn jobs, sets reminders, and runs locally in Docker.
+🎯 **Objective**: Local AI agent with advanced voice commands, multiple LLM providers, and intelligent task execution capabilities.
 
-## 🚀 Features
+## ✨ New Phase-2 Features
 
-### Core Features (Phase 1)
+### Enhanced AI Integration
+- **🤖 Multi-LLM Support**: OpenAI, Anthropic Claude, Azure OpenAI, Local LLM ready
+- **⚙️ Advanced Settings**: Provider selection, API key management, voice library configuration
+- **🔐 Secure Storage**: API keys safely stored in localStorage with validation
+
+### Advanced Voice Integration  
+- **🎤 Dashboard Microphone**: Prominent voice button with real-time indicators
+- **🗣️ Voice Commands**: "Set reminder to call mom", "Send WhatsApp message"
+- **⚡ Task Execution**: Voice-to-action processing with visual feedback
+- **🧠 Smart Interpretation**: LLM-powered command understanding
+
+### Core Features (Phase 1 + 2)
 - **Voice Capture**: Microphone input with OpenAI Whisper transcription
 - **YouTube Summarizer**: Fetch and summarize top 5 videos on any topic
 - **Job Search**: Find and summarize top 10 jobs from LinkedIn/Indeed

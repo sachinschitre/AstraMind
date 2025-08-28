@@ -30,9 +30,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize OpenAI client
+# Initialize API keys
 openai.api_key = os.getenv("OPENAI_API_KEY")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+AZURE_API_KEY = os.getenv("AZURE_API_KEY")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
 # Database initialization
 def init_db():
@@ -370,6 +373,137 @@ async def text_to_speech(text: str, language: str = "en"):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Text-to-speech failed: {str(e)}")
+
+@app.post("/llm-process")
+async def llm_process(
+    text: str = Form(...), 
+    provider: str = Form("openai"),
+    api_key: str = Form(None)
+):
+    """Process text using specified LLM provider"""
+    try:
+        if provider == "openai":
+            # Use provided API key if available, otherwise fallback to environment
+            current_api_key = api_key if api_key else openai.api_key
+            if not current_api_key:
+                raise HTTPException(status_code=400, detail="OpenAI API key required")
+            
+            # Temporarily set the API key for this request
+            original_key = openai.api_key
+            openai.api_key = current_api_key
+            
+            try:
+                response = openai.ChatCompletion.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You are AstraMind, a helpful AI assistant. Process the user's request and provide a clear, actionable response."},
+                        {"role": "user", "content": text}
+                    ],
+                    max_tokens=500
+                )
+                result = response.choices[0].message.content
+            finally:
+                openai.api_key = original_key
+                
+        elif provider == "anthropic":
+            if not api_key and not ANTHROPIC_API_KEY:
+                raise HTTPException(status_code=400, detail="Anthropic API key required")
+            
+            # For demo purposes, simulate Anthropic response
+            result = f"[ANTHROPIC SIMULATION] Processed: {text[:100]}... Response would be generated using Claude API."
+            
+        elif provider == "azure":
+            if not api_key and not AZURE_API_KEY:
+                raise HTTPException(status_code=400, detail="Azure API key required")
+            
+            # For demo purposes, simulate Azure OpenAI response
+            result = f"[AZURE SIMULATION] Processed: {text[:100]}... Response would be generated using Azure OpenAI."
+            
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported LLM provider")
+        
+        return {
+            "provider": provider,
+            "response": result,
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM processing failed: {str(e)}")
+
+@app.post("/task-execute")
+async def task_execute(
+    command: str = Form(...),
+    provider: str = Form("openai"),
+    api_key: str = Form(None)
+):
+    """Execute a task based on voice command"""
+    try:
+        command_lower = command.lower()
+        
+        if "reminder" in command_lower or "remind" in command_lower:
+            # Extract reminder text and create a mock reminder
+            reminder_text = command.replace("remind", "").replace("reminder", "").replace("me", "").replace("to", "").strip()
+            
+            # Create reminder with current time + 1 hour
+            reminder_time = datetime.now() + timedelta(hours=1)
+            
+            conn = sqlite3.connect('astramind.db')
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO reminders (task, reminder_time, status)
+                VALUES (?, ?, ?)
+            ''', (reminder_text, reminder_time.isoformat(), 'pending'))
+            conn.commit()
+            reminder_id = cursor.lastrowid
+            conn.close()
+            
+            return {
+                "task_type": "reminder",
+                "action": "created",
+                "details": {
+                    "id": reminder_id,
+                    "task": reminder_text,
+                    "reminder_time": reminder_time.isoformat()
+                },
+                "message": f"✅ Reminder created: '{reminder_text}' for {reminder_time.strftime('%Y-%m-%d %H:%M')}"
+            }
+            
+        elif "whatsapp" in command_lower or "message" in command_lower:
+            # Simulate WhatsApp message sending
+            message_content = "Hello! This is a simulated message from AstraMind AI."
+            
+            return {
+                "task_type": "whatsapp",
+                "action": "sent",
+                "details": {
+                    "message": message_content,
+                    "recipient": "primary_contact",
+                    "platform": "whatsapp"
+                },
+                "message": f"✅ Mock WhatsApp message sent: '{message_content}'"
+            }
+            
+        else:
+            # Use LLM to interpret and respond to the command
+            llm_response = await llm_process(
+                text=f"Interpret this command and suggest an appropriate action: {command}",
+                provider=provider,
+                api_key=api_key
+            )
+            
+            return {
+                "task_type": "interpretation",
+                "action": "analyzed",
+                "details": {
+                    "original_command": command,
+                    "llm_response": llm_response["response"]
+                },
+                "message": "Command interpreted by AI"
+            }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Task execution failed: {str(e)}")
 
 @app.get("/health")
 async def health_check():

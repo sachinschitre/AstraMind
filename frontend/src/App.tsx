@@ -353,6 +353,30 @@ export default function App() {
     }
   };
 
+  // --- Settings (Phase 2) ---
+  const [llmProvider, setLlmProvider] = useState<string>(() => ls.get("llmProvider", "openai"));
+  const [voiceLibrary, setVoiceLibrary] = useState<string>(() => ls.get("voiceLibrary", "web-speech"));
+  const [apiKeys, setApiKeys] = useState({
+    openai: ls.get("openaiKey", ""),
+    anthropic: ls.get("anthropicKey", ""),
+    azure: ls.get("azureKey", ""),
+    elevenlabs: ls.get("elevenlabsKey", "")
+  });
+
+  // Update settings in localStorage
+  useEffect(() => {
+    ls.set("llmProvider", llmProvider);
+    ls.set("voiceLibrary", voiceLibrary);
+    ls.set("openaiKey", apiKeys.openai);
+    ls.set("anthropicKey", apiKeys.anthropic);
+    ls.set("azureKey", apiKeys.azure);
+    ls.set("elevenlabsKey", apiKeys.elevenlabs);
+  }, [llmProvider, voiceLibrary, apiKeys]);
+
+  const updateApiKey = (provider: string, key: string) => {
+    setApiKeys(prev => ({ ...prev, [provider]: key }));
+  };
+
   // --- Emergency (mock) ---
   const [emergencyOpen, setEmergencyOpen] = useState(false);
   const [emergencyType, setEmergencyType] = useState<"Ambulance" | "Police" | "Fire">("Ambulance");
@@ -360,6 +384,43 @@ export default function App() {
   const triggerEmergency = () => {
     pushLog("warn", `EMERGENCY (${emergencyType}) requested. Simulating call → SMS → WhatsApp → Email.`);
     setEmergencyOpen(false);
+  };
+
+  // --- Task Execution (Phase 2) ---
+  const executeTask = async (command: string) => {
+    pushLog("info", `🎯 Executing task: "${command}"`);
+    
+    try {
+      const formData = new FormData();
+      formData.append('command', command);
+      formData.append('provider', llmProvider);
+      
+      // Add API key if available
+      const currentApiKey = apiKeys[llmProvider as keyof typeof apiKeys];
+      if (currentApiKey) {
+        formData.append('api_key', currentApiKey);
+      }
+      
+      const response = await fetch('/api/task-execute', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        pushLog("success", result.message);
+        
+        // Update UI based on task type
+        if (result.task_type === "reminder" && result.action === "created") {
+          loadReminders(); // Refresh reminders list
+        }
+      } else {
+        const error = await response.json();
+        pushLog("error", `Task execution failed: ${error.detail}`);
+      }
+    } catch (error) {
+      pushLog("error", `Task execution failed: ${error}`);
+    }
   };
 
   // --- Log helpers ---
@@ -386,9 +447,24 @@ export default function App() {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-2">
             <LayoutGrid className="h-6 w-6" />
-            <span className="font-semibold tracking-tight">AstraMind • Phase 1 MVP</span>
+            <span className="font-semibold tracking-tight">AstraMind • Phase 2 AI/Voice</span>
           </div>
           <div className="flex items-center gap-2">
+            {/* Quick Voice Command Button */}
+            <button
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm border-2 transition-colors ${
+                listening 
+                  ? "border-red-500 bg-red-50 text-red-700 dark:bg-red-900 dark:text-red-300" 
+                  : "border-primary bg-primary text-primary-foreground hover:bg-primary/90"
+              }`}
+              onClick={listening ? stopListening : startListening}
+            >
+              <Mic className={`h-4 w-4 ${listening ? "animate-pulse" : ""}`} />
+              {listening ? "Stop" : "Voice"}
+            </button>
+            
+            <div className="mx-1 h-6 w-px bg-border" />
+            
             <button
               className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-accent"
               onClick={() => setNav("help")}
@@ -455,6 +531,47 @@ export default function App() {
 
         {/* Main */}
         <main className="grid grid-cols-1 gap-4">
+          {/* Voice Command Display */}
+          {transcript && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-xl border bg-card p-4"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Mic className="h-4 w-4" />
+                  <span className="font-medium text-sm">Voice Command</span>
+                  <span className={`px-2 py-1 rounded text-xs ${
+                    listening ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+                  }`}>
+                    {listening ? "Listening..." : "Captured"}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => executeTask(transcript)}
+                    className="px-3 py-1 rounded bg-primary text-primary-foreground text-xs hover:bg-primary/90"
+                  >
+                    Execute
+                  </button>
+                  <button
+                    onClick={() => setTranscript("")}
+                    className="px-3 py-1 rounded border text-xs hover:bg-accent"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div className="rounded-lg border p-3 text-sm bg-muted/50">
+                "{transcript}"
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                Try saying: "Set a reminder to call mom" or "Send a WhatsApp message"
+              </p>
+            </motion.div>
+          )}
+
           {nav === "tasks" && (
             <>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -823,32 +940,149 @@ export default function App() {
           )}
 
           {nav === "settings" && (
-            <div className="rounded-xl border bg-card p-6">
-              <h3 className="font-semibold mb-4">Settings</h3>
-              <p className="text-sm text-muted-foreground mb-6">
-                These are Phase 1 placeholders. Phase 2 adds providers & keys.
-              </p>
-              
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-xl border p-4">
-                  <div className="mb-2 flex items-center justify-between">
-                    <div>
-                      <div className="font-medium">Theme</div>
-                      <div className="text-sm text-muted-foreground">
-                        Currently {dark ? "Dark" : "Light"} (toggle in header)
-                      </div>
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="rounded-xl border bg-card p-6">
+                <h3 className="font-semibold mb-2">Settings - Phase 2</h3>
+                <p className="text-sm text-muted-foreground">
+                  Configure AI providers, voice libraries, and API keys for enhanced functionality.
+                </p>
+              </div>
+
+              {/* AI Provider Settings */}
+              <div className="rounded-xl border bg-card p-6">
+                <h4 className="font-medium mb-4">AI Provider Configuration</h4>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">LLM Provider</label>
+                    <select
+                      value={llmProvider}
+                      onChange={(e) => setLlmProvider(e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-sm bg-background"
+                    >
+                      <option value="openai">OpenAI (GPT-4, GPT-3.5)</option>
+                      <option value="anthropic">Anthropic (Claude)</option>
+                      <option value="azure">Azure OpenAI</option>
+                      <option value="local">Local LLM (Ollama)</option>
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Voice Library</label>
+                    <select
+                      value={voiceLibrary}
+                      onChange={(e) => setVoiceLibrary(e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-sm bg-background"
+                    >
+                      <option value="web-speech">Web Speech API</option>
+                      <option value="azure-tts">Azure Text-to-Speech</option>
+                      <option value="elevenlabs">ElevenLabs</option>
+                      <option value="gtts">Google TTS (Current)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* API Keys */}
+              <div className="rounded-xl border bg-card p-6">
+                <h4 className="font-medium mb-4">API Keys (Securely stored in localStorage)</h4>
+                <div className="grid gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">OpenAI API Key</label>
+                    <input
+                      type="password"
+                      placeholder="sk-..."
+                      value={apiKeys.openai}
+                      onChange={(e) => updateApiKey("openai", e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-sm bg-background"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Used for GPT models and Whisper speech recognition
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Anthropic API Key</label>
+                    <input
+                      type="password"
+                      placeholder="sk-ant-..."
+                      value={apiKeys.anthropic}
+                      onChange={(e) => updateApiKey("anthropic", e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-sm bg-background"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Used for Claude models and advanced reasoning
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Azure API Key</label>
+                    <input
+                      type="password"
+                      placeholder="Azure subscription key..."
+                      value={apiKeys.azure}
+                      onChange={(e) => updateApiKey("azure", e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-sm bg-background"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Used for Azure OpenAI and TTS services
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium mb-2">ElevenLabs API Key</label>
+                    <input
+                      type="password"
+                      placeholder="ElevenLabs API key..."
+                      value={apiKeys.elevenlabs}
+                      onChange={(e) => updateApiKey("elevenlabs", e.target.value)}
+                      className="w-full rounded-lg border px-3 py-2 text-sm bg-background"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Used for high-quality voice synthesis
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Current Configuration */}
+              <div className="rounded-xl border bg-card p-6">
+                <h4 className="font-medium mb-4">Current Configuration</h4>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-lg border p-3 bg-muted/50">
+                    <div className="font-medium text-sm">Active LLM Provider</div>
+                    <div className="text-sm text-muted-foreground capitalize">{llmProvider}</div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {apiKeys[llmProvider as keyof typeof apiKeys] ? "✅ API key configured" : "❌ API key missing"}
                     </div>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    In Phase 2+: choose LLM, voice engine, and add API keys here.
-                  </p>
-                </div>
-                
-                <div className="rounded-xl border p-4">
-                  <div className="mb-2 font-medium">About</div>
-                  <p className="text-sm text-muted-foreground">
-                    AstraMind MVP—AI agent scaffold with logs and secure UX patterns.
-                  </p>
+                  
+                  <div className="rounded-lg border p-3 bg-muted/50">
+                    <div className="font-medium text-sm">Active Voice Library</div>
+                    <div className="text-sm text-muted-foreground">{voiceLibrary.replace("-", " ").toUpperCase()}</div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {voiceLibrary === "web-speech" || voiceLibrary === "gtts" ? "✅ Always available" : 
+                       apiKeys[voiceLibrary === "azure-tts" ? "azure" : "elevenlabs"] ? "✅ API key configured" : "❌ API key missing"}
+                    </div>
+                  </div>
+                  
+                  <div className="rounded-lg border p-3 bg-muted/50">
+                    <div className="font-medium text-sm">Theme</div>
+                    <div className="text-sm text-muted-foreground">
+                      {dark ? "Dark" : "Light"} mode
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Toggle in header
+                    </div>
+                  </div>
+                  
+                  <div className="rounded-lg border p-3 bg-muted/50">
+                    <div className="font-medium text-sm">Version</div>
+                    <div className="text-sm text-muted-foreground">Phase 2 MVP</div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Enhanced AI & Voice Integration
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
